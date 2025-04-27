@@ -6,7 +6,9 @@ const { v2: cloudinary } = require('cloudinary');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// میدلورها
 app.use(cors());
+app.use(express.json()); // این رو اضافه کن حتماً
 
 // تنظیمات Cloudinary
 cloudinary.config({
@@ -20,7 +22,7 @@ app.get('/', (req, res) => {
   res.send('MENI Server is running...');
 });
 
-// روت اصلی ما: چک کردن آپلود کاربر
+// روت اصلی: چک کردن آپلود کاربر
 app.get('/check-upload/:telegramId', async (req, res) => {
   const { telegramId } = req.params;
 
@@ -41,6 +43,7 @@ app.get('/check-upload/:telegramId', async (req, res) => {
   }
 });
 
+// سرور گوش بده
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT})`;
 });
