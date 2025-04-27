@@ -26,7 +26,7 @@ app.get('/check-upload/:telegramId', async (req, res) => {
 
   try {
     const result = await cloudinary.search
-      .expression(context.telegramId=${telegramId})
+      .expression(`context.telegramId=${telegramId}`)
       .max_results(1)
       .execute();
 
