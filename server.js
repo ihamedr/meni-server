@@ -6,9 +6,8 @@ const { v2: cloudinary } = require('cloudinary');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// میدلورها
 app.use(cors());
-app.use(express.json()); // این رو اضافه کن حتماً
+app.use(express.json()); // اضافه شد برای پارس کردن JSON
 
 // تنظیمات Cloudinary
 cloudinary.config({
@@ -22,7 +21,7 @@ app.get('/', (req, res) => {
   res.send('MENI Server is running...');
 });
 
-// روت اصلی: چک کردن آپلود کاربر
+// روت چک کردن آپلود قبلی
 app.get('/check-upload/:telegramId', async (req, res) => {
   const { telegramId } = req.params;
 
@@ -43,7 +42,18 @@ app.get('/check-upload/:telegramId', async (req, res) => {
   }
 });
 
-// سرور گوش بده
+// روت دریافت اطلاعات آپلود (در صورت نیاز)
+app.post('/upload', (req, res) => {
+  const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime } = req.body;
+  
+  if (!memeUrl || !title || !telegramId) {
+    return res.status(400).json({ success: false, message: 'Missing required fields.' });
+  }
+
+  console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime });
+  res.json({ success: true });
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT})`;
+  console.log(`Server running on port ${PORT}`);
 });
