@@ -64,7 +64,7 @@ app.post('/like', async (req, res) => {
 
   try {
     const result = await cloudinary.search
-      .expression(public_id=${memeId})
+      .expression(`public_id=${memeId}`)
       .max_results(1)
       .execute();
 
