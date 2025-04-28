@@ -1,60 +1,80 @@
+// === Import libraries
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { v2: cloudinary } = require('cloudinary');
 
+// === Initialize app
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
-app.use(express.json()); // اضافه شد برای پارس کردن JSON
-
-// تنظیمات CORS برای فقط مجاز کردن دامنه خاص
-const corsOptions = {
-  origin: 'https://meni-test.onrender.com',  // فقط این دامنه مجاز است
+// === Middlewares
+app.use(express.json());
+app.use(cors({
+  origin: 'https://meni-test.onrender.com',
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-};
+}));
 
-app.use(cors(corsOptions));  // اعمال تنظیمات CORS در اپلیکیشن
-
-// تنظیمات Cloudinary
+// === Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// روت ساده برای چک کردن
+// === Routes
+
+// Health Check
 app.get('/', (req, res) => {
   res.send('MENI Server is running...');
 });
 
-// روت چک کردن آپلود قبلی
+// Fetch all memes
+app.get('/memes', async (req, res) => {
+  try {
+    const result = await cloudinary.search
+      .expression('resource_type:image') // Customize if needed
+      .sort_by('created_at','desc')
+      .max_results(50)
+      .execute();
+
+    const memes = result.resources.map(meme => ({
+      id: meme.public_id,
+      memeUrl: meme.secure_url,
+      telegramUsername: meme.context?.custom?.telegramUsername || 'Anonymous',
+      likes: parseInt(meme.context?.custom?.likes || '0'),
+      votes: parseInt(meme.context?.custom?.votes || '0')
+    }));
+
+    res.json(memes);
+  } catch (error) {
+    console.error('Fetching memes error:', error);
+    res.status(500).json({ error: 'Server error fetching memes' });
+  }
+});
+
+// Check if user uploaded a meme
 app.get('/check-upload/:telegramId', async (req, res) => {
   const { telegramId } = req.params;
 
   try {
     const result = await cloudinary.search
-      .expression(`context.telegramId=${telegramId}`)
+      .expression(`context.custom.telegramId=${telegramId}`)
       .max_results(1)
       .execute();
 
-    if (result.resources.length > 0) {
-      return res.json({ uploaded: true });
-    } else {
-      return res.json({ uploaded: false });
-    }
+    res.json({ uploaded: result.resources.length > 0 });
   } catch (error) {
     console.error('Cloudinary Search Error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// روت دریافت اطلاعات آپلود (در صورت نیاز)
+// Receive upload info (optional, no actual upload here)
 app.post('/upload', (req, res) => {
   const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime } = req.body;
-  
+
   if (!memeUrl || !title || !telegramId) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
@@ -63,7 +83,7 @@ app.post('/upload', (req, res) => {
   res.json({ success: true });
 });
 
-// روت برای ثبت لایک
+// Like a meme
 app.post('/like', async (req, res) => {
   const { telegramId, memeId } = req.body;
 
@@ -82,25 +102,25 @@ app.post('/like', async (req, res) => {
     }
 
     const meme = result.resources[0];
-    const context = meme.context || {};  // بررسی کردن اگر context وجود داشته باشد
-    const likes = context.likes ? parseInt(context.likes) : 0;  // اگر لایک وجود داشته باشد
-    const likedBy = context.likedBy ? context.likedBy.split(',') : [];  // لیست کسانی که لایک کرده‌اند
+    const context = meme.context?.custom || {};
 
-    // چک کردن اینکه آیا این تلگرام آیدی قبلاً لایک کرده است یا نه
+    const likes = parseInt(context.likes || '0');
+    const likedBy = context.likedBy ? context.likedBy.split(',') : [];
+
     if (likedBy.includes(telegramId)) {
       return res.status(400).json({ success: false, message: 'You have already liked this meme.' });
     }
 
-    // اضافه کردن لایک جدید
     likedBy.push(telegramId);
 
-    // آپدیت کردن context با آرایه جدید likedBy و افزایش تعداد لایک‌ها
     await cloudinary.uploader.explicit(meme.public_id, {
       context: {
         ...context,
         likedBy: likedBy.join(','),
         likes: (likes + 1).toString()
-      }
+      },
+      type: 'upload',
+      resource_type: 'image'
     });
 
     res.json({ success: true, message: 'Like registered successfully.' });
@@ -111,7 +131,7 @@ app.post('/like', async (req, res) => {
   }
 });
 
-// روت برای ثبت ووت
+// Vote for a meme
 app.post('/vote', async (req, res) => {
   const { telegramId, memeId } = req.body;
 
@@ -130,24 +150,25 @@ app.post('/vote', async (req, res) => {
     }
 
     const meme = result.resources[0];
-    const context = meme.context || {};  // بررسی کردن اگر context وجود داشته باشد
-    const votedBy = context.votedBy ? context.votedBy.split(',') : [];  // اگر قبلاً رای داده باشیم
+    const context = meme.context?.custom || {};
 
-    // چک کردن اینکه آیا این تلگرام آیدی قبلاً رای داده است یا نه
+    const votes = parseInt(context.votes || '0');
+    const votedBy = context.votedBy ? context.votedBy.split(',') : [];
+
     if (votedBy.includes(telegramId)) {
       return res.status(400).json({ success: false, message: 'You have already voted for this meme.' });
     }
 
-    // اضافه کردن رای جدید
     votedBy.push(telegramId);
 
-    // آپدیت کردن context با آرایه جدید votedBy و افزایش تعداد رای‌ها
     await cloudinary.uploader.explicit(meme.public_id, {
       context: {
         ...context,
         votedBy: votedBy.join(','),
-        votes: (parseInt(context.votes || '0') + 1).toString()
-      }
+        votes: (votes + 1).toString()
+      },
+      type: 'upload',
+      resource_type: 'image'
     });
 
     res.json({ success: true, message: 'Vote registered successfully.' });
@@ -158,6 +179,7 @@ app.post('/vote', async (req, res) => {
   }
 });
 
+// === Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
