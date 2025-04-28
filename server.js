@@ -9,6 +9,15 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json()); // اضافه شد برای پارس کردن JSON
 
+// تنظیمات CORS برای فقط مجاز کردن دامنه خاص
+const corsOptions = {
+  origin: 'https://meni-test.onrender.com',  // فقط این دامنه مجاز است
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));  // اعمال تنظیمات CORS در اپلیکیشن
+
 // تنظیمات Cloudinary
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
