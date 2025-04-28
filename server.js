@@ -1,185 +1,134 @@
-// === Import libraries
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const { v2: cloudinary } = require('cloudinary');
+import express from 'express';
+import bodyParser from 'body-parser';
+import cors from 'cors';
+import { GoogleSpreadsheet } from 'google-spreadsheet';
+import { JWT } from 'google-auth-library';
+import cloudinary from 'cloudinary';
+import dotenv from 'dotenv';
 
-// === Initialize app
+dotenv.config();
 const app = express();
+app.use(cors());
+app.use(bodyParser.json());
+
 const PORT = process.env.PORT || 3000;
 
-// === Middlewares
-app.use(express.json());
-app.use(cors({
-  origin: 'https://meni-test.onrender.com',
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
-// === Cloudinary config
-cloudinary.config({
+// تنظیمات Cloudinary
+cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// === Routes
+// تنظیمات Google Sheets
+const serviceAccountAuth = new JWT({
+  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+  key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  scopes: ['https://www.googleapis.com/auth/spreadsheets']
+});
 
-// Health Check
+const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
+
+// روت اصلی
 app.get('/', (req, res) => {
   res.send('MENI Server is running...');
 });
 
-// Fetch all memes
+// گرفتن لیست میم‌ها
 app.get('/memes', async (req, res) => {
   try {
-    const result = await cloudinary.search
-      .expression('resource_type:image') // Customize if needed
+    const result = await cloudinary.v2.search
+      .expression('resource_type:image')
       .sort_by('created_at','desc')
-      .max_results(50)
+      .max_results(30)
       .execute();
 
     const memes = result.resources.map(meme => ({
-      id: meme.public_id,
       memeUrl: meme.secure_url,
-      telegramUsername: meme.context?.custom?.telegramUsername || 'Anonymous',
+      title: meme.context?.custom?.title || 'Untitled',
+      telegramUsername: meme.context?.custom?.telegramUsername || 'Unknown',
+      telegramId: meme.context?.custom?.telegramId || 'Unknown',
       likes: parseInt(meme.context?.custom?.likes || '0'),
-      votes: parseInt(meme.context?.custom?.votes || '0')
+      votes: parseInt(meme.context?.custom?.votes || '0'),
+      id: meme.public_id
     }));
 
     res.json(memes);
   } catch (error) {
-    console.error('Fetching memes error:', error);
+    console.error('Error fetching memes:', error);
     res.status(500).json({ error: 'Server error fetching memes' });
   }
 });
 
-// Check if user uploaded a meme
-app.get('/check-upload/:telegramId', async (req, res) => {
-  const { telegramId } = req.params;
-
+// آپلود میم
+app.post('/upload', async (req, res) => {
   try {
-    const result = await cloudinary.search
-      .expression(`context.custom.telegramId=${telegramId}`)
-      .max_results(1)
-      .execute();
-
-    res.json({ uploaded: result.resources.length > 0 });
-  } catch (error) {
-    console.error('Cloudinary Search Error:', error);
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Receive upload info (optional, no actual upload here)
-app.post('/upload', (req, res) => {
-  const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime } = req.body;
-
-  if (!memeUrl || !title || !telegramId) {
-    return res.status(400).json({ success: false, message: 'Missing required fields.' });
-  }
-
-  console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime });
-  res.json({ success: true });
-});
-
-// Like a meme
-app.post('/like', async (req, res) => {
-  const { telegramId, memeId } = req.body;
-
-  if (!telegramId || !memeId) {
-    return res.status(400).json({ success: false, message: 'Missing required fields.' });
-  }
-
-  try {
-    const result = await cloudinary.search
-      .expression(`public_id=${memeId}`)
-      .max_results(1)
-      .execute();
-
-    if (result.resources.length === 0) {
-      return res.status(404).json({ success: false, message: 'Meme not found.' });
+    const { memeBase64, telegramId, telegramUsername } = req.body;
+    if (!memeBase64 || !telegramId || !telegramUsername) {
+      return res.status(400).json({ error: 'Missing required fields.' });
     }
 
-    const meme = result.resources[0];
-    const context = meme.context?.custom || {};
-
-    const likes = parseInt(context.likes || '0');
-    const likedBy = context.likedBy ? context.likedBy.split(',') : [];
-
-    if (likedBy.includes(telegramId)) {
-      return res.status(400).json({ success: false, message: 'You have already liked this meme.' });
-    }
-
-    likedBy.push(telegramId);
-
-    await cloudinary.uploader.explicit(meme.public_id, {
+    const uploadResult = await cloudinary.v2.uploader.upload(memeBase64, {
+      folder: 'meni_memes',
       context: {
-        ...context,
-        likedBy: likedBy.join(','),
-        likes: (likes + 1).toString()
-      },
-      type: 'upload',
-      resource_type: 'image'
+        telegramId,
+        telegramUsername,
+        title: 'Untitled',
+        likes: 0,
+        votes: 0
+      }
     });
 
-    res.json({ success: true, message: 'Like registered successfully.' });
-
+    res.json({ message: 'Meme uploaded successfully', memeUrl: uploadResult.secure_url });
   } catch (error) {
-    console.error('Like Error:', error);
-    res.status(500).json({ success: false, message: 'Server error.' });
+    console.error('Error uploading meme:', error);
+    res.status(500).json({ error: 'Server error uploading meme' });
   }
 });
 
-// Vote for a meme
+// رای دادن به میم
 app.post('/vote', async (req, res) => {
-  const { telegramId, memeId } = req.body;
-
-  if (!telegramId || !memeId) {
-    return res.status(400).json({ success: false, message: 'Missing required fields.' });
-  }
-
   try {
-    const result = await cloudinary.search
-      .expression(`public_id=${memeId}`)
-      .max_results(1)
-      .execute();
-
-    if (result.resources.length === 0) {
-      return res.status(404).json({ success: false, message: 'Meme not found.' });
+    const { memeId, telegramId } = req.body;
+    if (!memeId || !telegramId) {
+      return res.status(400).json({ error: 'Missing memeId or telegramId' });
     }
 
-    const meme = result.resources[0];
-    const context = meme.context?.custom || {};
+    const meme = await cloudinary.v2.api.resource(memeId, { resource_type: 'image' });
 
-    const votes = parseInt(context.votes || '0');
-    const votedBy = context.votedBy ? context.votedBy.split(',') : [];
+    let currentVotes = parseInt(meme.context?.custom?.votes || '0');
+    currentVotes++;
 
-    if (votedBy.includes(telegramId)) {
-      return res.status(400).json({ success: false, message: 'You have already voted for this meme.' });
-    }
-
-    votedBy.push(telegramId);
-
-    await cloudinary.uploader.explicit(meme.public_id, {
-      context: {
-        ...context,
-        votedBy: votedBy.join(','),
-        votes: (votes + 1).toString()
-      },
+    await cloudinary.v2.uploader.explicit(memeId, {
       type: 'upload',
-      resource_type: 'image'
+      context: {
+        ...meme.context.custom,
+        votes: currentVotes
+      }
     });
 
-    res.json({ success: true, message: 'Vote registered successfully.' });
-
+    res.json({ message: 'Vote counted', votes: currentVotes });
   } catch (error) {
-    console.error('Voting Error:', error);
-    res.status(500).json({ success: false, message: 'Server error.' });
+    console.error('Error voting meme:', error);
+    res.status(500).json({ error: 'Server error voting meme' });
   }
 });
 
-// === Start server
+// چک آپلود برای جلوگیری از آپلود دوباره
+app.get('/check-upload/:telegramId', async (req, res) => {
+  try {
+    const telegramId = req.params.telegramId;
+    const result = await cloudinary.v2.search
+      .expression(`resource_type:image AND context.telegramId=${telegramId}`)
+      .execute();
+
+    res.json({ hasUploaded: result.total_count > 0 });
+  } catch (error) {
+    console.error('Error checking upload:', error);
+    res.status(500).json({ error: 'Server error checking upload' });
+  }
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
