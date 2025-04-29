@@ -41,17 +41,101 @@ app.get('/check-upload/:telegramId', async (req, res) => {
     res.status(500).json({ error: 'Server error' });
   }
 });
+app.post('/memes/:id/like', async (req, res) => {
+  const memeId = req.params.id;
 
+  try {
+    const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
+
+    const currentLikes = parseInt(resource.context?.custom?.likes) || 0;
+    const newLikes = currentLikes + 1;
+
+    await cloudinary.uploader.update(memeId, {
+      context: {
+        ...resource.context.custom,
+        likes: newLikes.toString(),
+      }
+    });
+
+    res.json({ success: true, newLikes });
+  } catch (error) {
+    console.error('Error updating like:', error);
+    res.status(500).json({ error: 'Failed to update like.' });
+  }
+});
+app.post('/memes/:id/vote', async (req, res) => {
+  const memeId = req.params.id;
+  const { voterId } = req.body; // voterId = telegramId کسی که رای داده
+
+  if (!voterId) {
+    return res.status(400).json({ error: 'voterId is required.' });
+  }
+
+  try {
+    const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
+
+    const currentVotes = parseInt(resource.context?.custom?.votes) || 0;
+    const currentVoters = resource.context?.custom?.voters ? JSON.parse(resource.context.custom.voters) : [];
+
+    if (currentVoters.includes(voterId)) {
+      return res.status(400).json({ error: 'User has already voted.' });
+    }
+
+    currentVoters.push(voterId);
+
+    await cloudinary.uploader.update(memeId, {
+      context: {
+        ...resource.context.custom,
+        votes: (currentVotes + 1).toString(),
+        voters: JSON.stringify(currentVoters),
+      }
+    });
+
+    res.json({ success: true, newVotes: currentVotes + 1 });
+  } catch (error) {
+    console.error('Error updating vote:', error);
+    res.status(500).json({ error: 'Failed to update vote.' });
+  }
+});
 // روت دریافت اطلاعات آپلود (در صورت نیاز)
 app.post('/upload', (req, res) => {
-  const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime } = req.body;
+  const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime, voters } = req.body;
   
   if (!memeUrl || !title || !telegramId) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
-  console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime });
+  console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime, voters });
   res.json({ success: true });
+});
+app.get('/memes', async (req, res) => {
+  try {
+    const result = await cloudinary.search
+      .expression('resource_type:image')
+      .sort_by('created_at', 'desc')
+      .max_results(30)
+      .execute();
+
+    const memes = result.resources.map((resource) => {
+      const context = resource.context?.custom || {};
+      return {
+        id: resource.public_id,
+        url: resource.secure_url,
+        title: context.title || '',
+        telegramUsername: context.telegramUsername || '',
+        telegramId: context.telegramId || '',
+        likes: parseInt(context.likes) || 0,
+        votes: parseInt(context.votes) || 0,
+        voters: context.voters ? JSON.parse(context.voters) : [],
+        uploadTime: context.uploadTime || resource.created_at,
+      };
+    });
+
+    res.json(memes);
+  } catch (error) {
+    console.error('Error fetching memes:', error);
+    res.status(500).json({ error: 'Failed to fetch memes.' });
+  }
 });
 
 app.listen(PORT, () => {
