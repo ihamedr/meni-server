@@ -7,53 +7,50 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json()); // اضافه شد برای پارس کردن JSON
+app.use(express.json());
 
-// تنظیمات Cloudinary
+// Cloudinary config
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// روت ساده برای چک کردن
+// Root route
 app.get('/', (req, res) => {
   res.send('MENI Server is running...');
 });
 
-// روت چک کردن آپلود قبلی
+// Check previous upload
 app.get('/check-upload/:telegramId', async (req, res) => {
   const { telegramId } = req.params;
-
   try {
     const result = await cloudinary.search
       .expression(`context.telegramId=${telegramId}`)
       .max_results(1)
       .execute();
 
-    if (result.resources.length > 0) {
-      return res.json({ uploaded: true });
-    } else {
-      return res.json({ uploaded: false });
-    }
+    return res.json({ uploaded: result.resources.length > 0 });
   } catch (error) {
     console.error('Cloudinary Search Error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
+
+// Like endpoint
 app.post('/memes/:id/like', async (req, res) => {
   const memeId = req.params.id;
 
   try {
     const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
-
-    const currentLikes = parseInt(resource.context?.custom?.likes) || 0;
+    const currentContext = resource.context?.custom || {};
+    const currentLikes = parseInt(currentContext.likes) || 0;
     const newLikes = currentLikes + 1;
 
     await cloudinary.uploader.update(memeId, {
       context: {
-        ...resource.context.custom,
-        likes: newLikes.toString(),
+        ...currentContext,
+        likes: newLikes.toString()
       }
     });
 
@@ -63,9 +60,11 @@ app.post('/memes/:id/like', async (req, res) => {
     res.status(500).json({ error: 'Failed to update like.' });
   }
 });
+
+// Vote endpoint
 app.post('/memes/:id/vote', async (req, res) => {
   const memeId = req.params.id;
-  const { voterId } = req.body; // voterId = telegramId کسی که رای داده
+  const { voterId } = req.body;
 
   if (!voterId) {
     return res.status(400).json({ error: 'voterId is required.' });
@@ -73,34 +72,36 @@ app.post('/memes/:id/vote', async (req, res) => {
 
   try {
     const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
-
-    const currentVotes = parseInt(resource.context?.custom?.votes) || 0;
-    const currentVoters = resource.context?.custom?.voters ? JSON.parse(resource.context.custom.voters) : [];
+    const currentContext = resource.context?.custom || {};
+    const currentVotes = parseInt(currentContext.votes) || 0;
+    const currentVoters = currentContext.voters ? JSON.parse(currentContext.voters) : [];
 
     if (currentVoters.includes(voterId)) {
       return res.status(400).json({ error: 'User has already voted.' });
     }
 
     currentVoters.push(voterId);
+    const newVotes = currentVotes + 1;
 
     await cloudinary.uploader.update(memeId, {
       context: {
-        ...resource.context.custom,
-        votes: (currentVotes + 1).toString(),
-        voters: JSON.stringify(currentVoters),
+        ...currentContext,
+        votes: newVotes.toString(),
+        voters: JSON.stringify(currentVoters)
       }
     });
 
-    res.json({ success: true, newVotes: currentVotes + 1 });
+    res.json({ success: true, newVotes });
   } catch (error) {
     console.error('Error updating vote:', error);
     res.status(500).json({ error: 'Failed to update vote.' });
   }
 });
-// روت دریافت اطلاعات آپلود (در صورت نیاز)
+
+// Upload (optional endpoint for tracking)
 app.post('/upload', (req, res) => {
   const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime, voters } = req.body;
-  
+
   if (!memeUrl || !title || !telegramId) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
@@ -108,6 +109,8 @@ app.post('/upload', (req, res) => {
   console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime, voters });
   res.json({ success: true });
 });
+
+// Get memes
 app.get('/memes', async (req, res) => {
   try {
     const result = await cloudinary.search
