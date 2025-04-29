@@ -43,24 +43,25 @@ app.post('/memes/:id/like', async (req, res) => {
 
   try {
     const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
+
     const currentContext = resource.context?.custom || {};
-    const currentLikes = parseInt(currentContext.likes) || 0;
+    const currentLikes = parseInt(currentContext.likes || "0");
+
     const newLikes = currentLikes + 1;
 
     await cloudinary.uploader.update(memeId, {
       context: {
         ...currentContext,
-        likes: newLikes.toString()
+        likes: newLikes.toString(),
       }
     });
 
     res.json({ success: true, newLikes });
   } catch (error) {
-    console.error('Error updating like:', error);
+    console.error('Error updating like:', error?.error?.message || error.message);
     res.status(500).json({ error: 'Failed to update like.' });
   }
 });
-
 // Vote endpoint
 app.post('/memes/:id/vote', async (req, res) => {
   const memeId = req.params.id;
@@ -72,8 +73,9 @@ app.post('/memes/:id/vote', async (req, res) => {
 
   try {
     const resource = await cloudinary.api.resource(memeId, { resource_type: 'image' });
+
     const currentContext = resource.context?.custom || {};
-    const currentVotes = parseInt(currentContext.votes) || 0;
+    const currentVotes = parseInt(currentContext.votes || "0");
     const currentVoters = currentContext.voters ? JSON.parse(currentContext.voters) : [];
 
     if (currentVoters.includes(voterId)) {
@@ -81,23 +83,21 @@ app.post('/memes/:id/vote', async (req, res) => {
     }
 
     currentVoters.push(voterId);
-    const newVotes = currentVotes + 1;
 
     await cloudinary.uploader.update(memeId, {
       context: {
         ...currentContext,
-        votes: newVotes.toString(),
-        voters: JSON.stringify(currentVoters)
+        votes: (currentVotes + 1).toString(),
+        voters: JSON.stringify(currentVoters),
       }
     });
 
-    res.json({ success: true, newVotes });
+    res.json({ success: true, newVotes: currentVotes + 1 });
   } catch (error) {
-    console.error('Error updating vote:', error);
+    console.error('Error updating vote:', error?.error?.message || error.message);
     res.status(500).json({ error: 'Failed to update vote.' });
   }
 });
-
 // Upload (optional endpoint for tracking)
 app.post('/upload', (req, res) => {
   const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime, voters } = req.body;
