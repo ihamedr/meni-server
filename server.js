@@ -100,13 +100,13 @@ app.post('/memes/:id/vote', async (req, res) => {
 
 // Upload (optional endpoint for tracking)
 app.post('/upload', (req, res) => {
-  const { memeUrl, title, telegramUsername, telegramId, likes, votes, uploadTime, voters } = req.body;
+  const { memeUrl, telegramUsername, telegramId, likes, votes, uploadTime, voters } = req.body;
 
-  if (!memeUrl || !title || !telegramId) {
+  if (!memeUrl || !telegramId) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
-  console.log('New Meme Uploaded:', { title, telegramUsername, telegramId, memeUrl, likes, votes, uploadTime, voters });
+  console.log('New Meme Uploaded:', { telegramUsername, telegramId, memeUrl, likes, votes, uploadTime, voters });
   res.json({ success: true });
 });
 
@@ -124,7 +124,6 @@ app.get('/memes', async (req, res) => {
       return {
         id: resource.public_id,
         url: resource.secure_url,
-        title: context.title || '',
         telegramUsername: context.telegramUsername || '',
         telegramId: context.telegramId || '',
         likes: parseInt(context.likes) || 0,
